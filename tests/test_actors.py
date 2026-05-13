@@ -9,12 +9,18 @@ class DummyChain:
 
 
 def test_chain_actor_run_delegates_to_wrapped_chain():
+    started_ray = False
     if not ray.is_initialized():
-        ray.init(local_mode=True, include_dashboard=False, num_cpus=1)
+        ray.init(include_dashboard=False, num_cpus=1)
+        started_ray = True
 
-    actor = ChainActor.remote(DummyChain())
+    try:
+        actor = ChainActor.remote(DummyChain())
 
-    assert ray.get(actor.run.remote("task", option=True)) == {
-        "args": ("task",),
-        "kwargs": {"option": True},
-    }
+        assert ray.get(actor.run.remote("task", option=True)) == {
+            "args": ("task",),
+            "kwargs": {"option": True},
+        }
+    finally:
+        if started_ray:
+            ray.shutdown()
