@@ -1,6 +1,20 @@
+import importlib.util
+from pathlib import Path
+
 import ray
 
-from agent_actors import ChainActor
+
+def load_chain_actor():
+    spec = importlib.util.spec_from_file_location(
+        "agent_actors_actors", Path(__file__).with_name("actors.py")
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ChainActor
+
+
+ChainActor = load_chain_actor()
 
 
 class DummyChain:
