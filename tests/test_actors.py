@@ -5,9 +5,8 @@ import ray
 
 
 def load_chain_actor():
-    spec = importlib.util.spec_from_file_location(
-        "agent_actors_actors", Path(__file__).with_name("actors.py")
-    )
+    actor_module = Path(__file__).resolve().parents[1] / "agent_actors" / "actors.py"
+    spec = importlib.util.spec_from_file_location("agent_actors_actors", actor_module)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
