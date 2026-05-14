@@ -24,7 +24,7 @@ class DummyChain:
 def test_chain_actor_run_dispatches_to_wrapped_chain():
     started_ray = not ray.is_initialized()
     if started_ray:
-        ray.init(ignore_reinit_error=True, include_dashboard=False, local_mode=True)
+        ray.init(ignore_reinit_error=True, include_dashboard=False)
     try:
         actor = ChainActor.remote(DummyChain())
 
