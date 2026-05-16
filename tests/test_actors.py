@@ -1,9 +1,11 @@
 import importlib.util
 import sys
+import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
-def load_actors_module(monkeypatch):
+def load_actors_module():
     class RayStub:
         @staticmethod
         def remote(**_kwargs):
@@ -12,31 +14,35 @@ def load_actors_module(monkeypatch):
 
             return decorate
 
-    monkeypatch.setitem(sys.modules, "ray", RayStub())
     module_path = Path(__file__).resolve().parents[1] / "agent_actors" / "actors.py"
     spec = importlib.util.spec_from_file_location("actors_under_test", module_path)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with patch.dict(sys.modules, {"ray": RayStub()}):
+        spec.loader.exec_module(module)
     return module
 
 
-def test_chain_actor_run_delegates_to_chain_run(monkeypatch):
-    actors = load_actors_module(monkeypatch)
+class ChainActorTests(unittest.TestCase):
+    def test_run_delegates_to_chain_run(self):
+        actors = load_actors_module()
 
-    class RecordingChain:
-        def run(self, *args, **kwargs):
-            return {"args": args, "kwargs": kwargs}
+        class RecordingChain:
+            def run(self, *args, **kwargs):
+                return {"args": args, "kwargs": kwargs}
 
-    result = actors.ChainActor(RecordingChain()).run("task", priority=3)
+        result = actors.ChainActor(RecordingChain()).run("task", priority=3)
 
-    assert result == {"args": ("task",), "kwargs": {"priority": 3}}
+        self.assertEqual(result, {"args": ("task",), "kwargs": {"priority": 3}})
+
+    def test_call_delegates_to_chain_methods(self):
+        actors = load_actors_module()
+
+        class RecordingChain:
+            def custom(self, value):
+                return value * 2
+
+        self.assertEqual(actors.ChainActor(RecordingChain()).call("custom", 21), 42)
 
 
-def test_chain_actor_call_delegates_to_chain_methods(monkeypatch):
-    actors = load_actors_module(monkeypatch)
-
-    class RecordingChain:
-        def custom(self, value):
-            return value * 2
-
-    assert actors.ChainActor(RecordingChain()).call("custom", 21) == 42
+if __name__ == "__main__":
+    unittest.main()
