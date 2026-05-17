@@ -2,8 +2,18 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
-import ray
+
+class RayStub:
+    def remote(self, **_remote_options):
+        def decorate(actor_class):
+            actor_class.remote = classmethod(
+                lambda cls, *args, **kwargs: cls(*args, **kwargs)
+            )
+            return actor_class
+
+        return decorate
 
 
 def load_actors_module():
@@ -15,7 +25,8 @@ def load_actors_module():
     spec = importlib.util.spec_from_file_location(module_name, actors_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    with mock.patch.dict(sys.modules, {"ray": RayStub()}):
+        spec.loader.exec_module(module)
     return module
 
 
@@ -25,19 +36,11 @@ class RecordingChain:
 
 
 class ChainActorTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        ray.init(ignore_reinit_error=True, include_dashboard=False, num_cpus=1)
-
-    @classmethod
-    def tearDownClass(cls):
-        ray.shutdown()
-
     def test_run_delegates_to_wrapped_chain_run(self):
         actors = load_actors_module()
         actor = actors.ChainActor.remote(RecordingChain())
 
-        result = ray.get(actor.run.remote("task", attempt=1))
+        result = actor.run("task", attempt=1)
 
         self.assertEqual(result, {"args": ("task",), "kwargs": {"attempt": 1}})
 
