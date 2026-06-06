@@ -24,7 +24,7 @@ class ChainActor:
         self.chain = chain
 
     def run(self, *args, **kwargs):
-        return self.agent.run(*args, **kwargs)
+        return self.chain.run(*args, **kwargs)
 
     def call(self, method: str = "", *args, **kwargs):
         method = self.chain if not method else getattr(self.chain, method)

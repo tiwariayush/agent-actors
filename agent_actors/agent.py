@@ -256,7 +256,7 @@ class Agent(BaseModel):
         match = re.search(r"^\D*(\d+)", score)
         if not match:
             return 0.0
-        return float(score[0]) / 10
+        return float(match.group(1)) / 10
 
     def _format_memories_to_summarize(self, relevant_memories: List[Document]) -> str:
         content_strs = set()
