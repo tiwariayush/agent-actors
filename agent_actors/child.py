@@ -1,6 +1,6 @@
 from pprint import pprint
 from textwrap import dedent
-from typing import List
+from typing import List, Optional
 
 import ray
 from pydantic import Field
@@ -28,16 +28,20 @@ class ChildAgent(Agent):
             check=Check.from_llm(**chain_params),
         )
 
-    def run(self, task: str, working_memory: List[ray.ObjectRef] = []):
+    def run(self, task: str, working_memory: Optional[List[ray.ObjectRef]] = None):
         try:
+            working_memory = working_memory or []
             self.status = "running"
 
             for _ in range(self.max_iterations):
                 self.task = task
 
                 context = self.get_context()
-                if any(working_memory):
-                    context += "\n" + "\n\n".join(ray.get(working_memory))
+                if working_memory:
+                    context += "\n" + "\n\n".join(
+                        self._format_task_result(result)
+                        for result in ray.get(working_memory)
+                    )
 
                 result = self.do(
                     inputs=dict(context=context, task=self.task),
