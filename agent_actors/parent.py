@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pprint import pprint
-from typing import List
+from typing import List, Optional
 
 import ray
 from langchain.schema import AgentAction, AgentFinish
@@ -30,17 +30,17 @@ class ParentAgent(Agent):
             adjust=Adjust.from_llm(**chain_params),
         )
 
-    def run(self, task: str, working_memory: List[ray.ObjectRef] = []):
+    def run(self, task: str, working_memory: Optional[List[ray.ObjectRef]] = None):
         try:
+            working_memory = working_memory or []
             self.status = "running"
             self.task = task
 
-            for x in working_memory:
-                if isinstance(x, AgentFinish):
-                    import ipdb
-
-                    ipdb.set_trace()
-            context = self.get_context() + "\n".join(ray.get(working_memory))
+            context = self.get_context()
+            if working_memory:
+                context += "\n" + "\n".join(
+                    self._format_task_result(result) for result in ray.get(working_memory)
+                )
 
             planned_tasks = [
                 TaskRecord(**t)
@@ -104,7 +104,7 @@ class ParentAgent(Agent):
                 results = ray.get(tasks_completed)
 
                 for result in results:
-                    task_results.append(result)
+                    task_results.append(self._format_task_result(result))
 
             self.pause_to_reflect()
 

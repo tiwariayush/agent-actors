@@ -1,13 +1,13 @@
 import re
 from datetime import datetime
 from textwrap import dedent
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import ray
 from langchain import LLMChain
 from langchain.agents import Tool
 from langchain.chat_models.base import BaseChatModel
-from langchain.schema import BaseRetriever, Document
+from langchain.schema import AgentAction, AgentFinish, BaseRetriever, Document
 from pydantic import BaseModel, Field
 
 from agent_actors.actors import AgentActor
@@ -76,6 +76,20 @@ class Agent(BaseModel):
 
     def remove_child(self, agent_id: int):
         return self.children.pop(agent_id)
+
+    @staticmethod
+    def _format_task_result(result: Any) -> str:
+        if isinstance(result, AgentFinish):
+            if result.return_values:
+                if len(result.return_values) == 1:
+                    return str(next(iter(result.return_values.values())))
+                return "\n".join(
+                    f"{key}: {value}" for key, value in result.return_values.items()
+                )
+            return result.log
+        if isinstance(result, AgentAction):
+            return result.log
+        return str(result)
 
     def generate_reaction(self, observation: str) -> Tuple[bool, str]:
         """React to a given observation."""
@@ -256,7 +270,7 @@ class Agent(BaseModel):
         match = re.search(r"^\D*(\d+)", score)
         if not match:
             return 0.0
-        return float(score[0]) / 10
+        return float(match.group(1)) / 10
 
     def _format_memories_to_summarize(self, relevant_memories: List[Document]) -> str:
         content_strs = set()
