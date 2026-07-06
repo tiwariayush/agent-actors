@@ -70,6 +70,23 @@ def install_dependency_stubs():
     langchain.PromptTemplate = PromptTemplate
     sys.modules["langchain"] = langchain
 
+    callbacks = types.ModuleType("langchain.callbacks")
+
+    class StdOutCallbackHandler:
+        def on_chain_end(self, outputs, **kwargs):
+            pass
+
+        def on_chain_start(self, serialized, inputs, **kwargs):
+            pass
+
+    class CallbackManager:
+        def __init__(self, handlers=None):
+            self.handlers = list(handlers or [])
+
+    callbacks.CallbackManager = CallbackManager
+    callbacks.StdOutCallbackHandler = StdOutCallbackHandler
+    sys.modules["langchain.callbacks"] = callbacks
+
     agents = types.ModuleType("langchain.agents")
 
     class Tool:
