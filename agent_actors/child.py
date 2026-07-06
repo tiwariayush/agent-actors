@@ -7,6 +7,7 @@ from pydantic import Field
 
 from agent_actors.agent import Agent
 from agent_actors.chains.child import Check, Do
+from agent_actors.results import format_agent_result
 
 
 class ChildAgent(Agent):
@@ -37,7 +38,9 @@ class ChildAgent(Agent):
 
                 context = self.get_context()
                 if any(working_memory):
-                    context += "\n" + "\n\n".join(ray.get(working_memory))
+                    context += "\n" + "\n\n".join(
+                        format_agent_result(result) for result in ray.get(working_memory)
+                    )
 
                 result = self.do(
                     inputs=dict(context=context, task=self.task),
