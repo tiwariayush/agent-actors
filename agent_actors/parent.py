@@ -10,6 +10,7 @@ from agent_actors.agent import Agent
 from agent_actors.chains.parent import Adjust, Plan
 from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
+from agent_actors.results import format_agent_result
 
 
 class ParentAgent(Agent):
@@ -35,12 +36,11 @@ class ParentAgent(Agent):
             self.status = "running"
             self.task = task
 
-            for x in working_memory:
-                if isinstance(x, AgentFinish):
-                    import ipdb
-
-                    ipdb.set_trace()
-            context = self.get_context() + "\n".join(ray.get(working_memory))
+            context = self.get_context()
+            if any(working_memory):
+                context += "\n" + "\n".join(
+                    format_agent_result(result) for result in ray.get(working_memory)
+                )
 
             planned_tasks = [
                 TaskRecord(**t)
@@ -49,8 +49,8 @@ class ParentAgent(Agent):
                         context=context,
                         task=self.task,
                         child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                            f"ID: {child_id}\n{child.get_context()}"
+                            for child_id, child in self.children.items()
                         ),
                     ),
                 )["json"]
@@ -73,15 +73,14 @@ class ParentAgent(Agent):
                 child_id = sub_task.child_id
 
                 if child_id not in self.children:
-                    self.add_child(
-                        ChildAgent(
-                            llm=self.llm,
-                            verbose=self.verbose,
-                            name=f"Team Member {sub_task.child_id}",
-                            traits=["focused", "team player"],
-                            max_iterations=3,
-                            callback_manager=self.callback_manager,
-                        )
+                    self.children[child_id] = ChildAgent(
+                        llm=self.llm,
+                        verbose=self.verbose,
+                        name=f"Team Member {sub_task.child_id}",
+                        traits=["focused", "team player"],
+                        max_iterations=3,
+                        tools=self.tools,
+                        long_term_memory=self.long_term_memory,
                     )
 
                 task_result_refs[sub_task.id] = self.children[
@@ -104,7 +103,7 @@ class ParentAgent(Agent):
                 results = ray.get(tasks_completed)
 
                 for result in results:
-                    task_results.append(result)
+                    task_results.append(format_agent_result(result))
 
             self.pause_to_reflect()
 
