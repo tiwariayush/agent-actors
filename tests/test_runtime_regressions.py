@@ -333,6 +333,72 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(parent.adjust.results, "nested result")
         self.assertEqual(result.return_values["result"], "final result")
 
+    def test_parent_agent_schedules_dependencies_before_dependents(self):
+        modules = load_runtime_modules()
+        parent_module = modules["agent_actors.parent"]
+        task_ref = modules["agent_actors.models"].TaskRef(child_id=0, task_id=0)
+        parent = object.__new__(parent_module.ParentAgent)
+        parent.status = "idle"
+        parent.verbose = False
+        parent.reflect_every = 10
+        parent.get_context = lambda force_refresh=False: "parent context"
+        parent.pause_to_reflect = lambda: None
+
+        class Plan:
+            def __call__(self, inputs):
+                return {
+                    "json": [
+                        {
+                            "task_id": 1,
+                            "child_id": 0,
+                            "task": "dependent",
+                            "dependencies": [task_ref],
+                        },
+                        {
+                            "task_id": 0,
+                            "child_id": 0,
+                            "task": "dependency",
+                            "dependencies": [],
+                        },
+                    ]
+                }
+
+        class Adjust:
+            def run(self, **kwargs):
+                return {"confidence": 8, "result": kwargs["results"]}
+
+        class RemoteRun:
+            def __init__(self):
+                self.calls = []
+
+            def remote(self, **kwargs):
+                self.calls.append(kwargs)
+                return f"result:{kwargs['task']}"
+
+        class Child:
+            def __init__(self):
+                self.remote_run = RemoteRun()
+                self.actor = types.SimpleNamespace(run=self.remote_run)
+
+            def get_context(self):
+                return "child context"
+
+        child = Child()
+        parent.children = {0: child}
+        parent.plan = Plan()
+        parent.adjust = Adjust()
+
+        parent.run("parent task")
+
+        self.assertEqual(
+            [call["task"] for call in child.remote_run.calls],
+            ["dependency", "dependent"],
+        )
+        self.assertEqual(
+            child.remote_run.calls[1]["working_memory"],
+            ["result:dependency"],
+        )
+
     def test_parent_agent_adds_missing_child_under_planned_id(self):
         modules = load_runtime_modules()
         parent_module = modules["agent_actors.parent"]
