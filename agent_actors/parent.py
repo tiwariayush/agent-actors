@@ -10,6 +10,7 @@ from agent_actors.agent import Agent
 from agent_actors.chains.parent import Adjust, Plan
 from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
+from agent_actors.results import format_agent_result
 
 
 class ParentAgent(Agent):
@@ -35,12 +36,11 @@ class ParentAgent(Agent):
             self.status = "running"
             self.task = task
 
-            for x in working_memory:
-                if isinstance(x, AgentFinish):
-                    import ipdb
-
-                    ipdb.set_trace()
-            context = self.get_context() + "\n".join(ray.get(working_memory))
+            context = self.get_context()
+            if any(working_memory):
+                context += "\n" + "\n".join(
+                    format_agent_result(result) for result in ray.get(working_memory)
+                )
 
             planned_tasks = [
                 TaskRecord(**t)
@@ -66,32 +66,51 @@ class ParentAgent(Agent):
 
             task_result_refs = {}
 
-            for sub_task in planned_tasks:
-                if self.verbose:
-                    print(f"\n\n\n=== CHILD TASK {sub_task} ===")
+            pending_tasks = planned_tasks
+            while any(pending_tasks):
+                deferred_tasks = []
+                for sub_task in pending_tasks:
+                    if not all(
+                        dependency.id in task_result_refs
+                        for dependency in sub_task.dependencies
+                    ):
+                        deferred_tasks.append(sub_task)
+                        continue
 
-                child_id = sub_task.child_id
+                    if self.verbose:
+                        print(f"\n\n\n=== CHILD TASK {sub_task} ===")
 
-                if child_id not in self.children:
-                    self.add_child(
-                        ChildAgent(
+                    child_id = sub_task.child_id
+
+                    if child_id not in self.children:
+                        self.children[child_id] = ChildAgent(
                             llm=self.llm,
                             verbose=self.verbose,
                             name=f"Team Member {sub_task.child_id}",
                             traits=["focused", "team player"],
+                            tools=self.tools,
+                            long_term_memory=self.long_term_memory,
                             max_iterations=3,
-                            callback_manager=self.callback_manager,
+                            callback_manager=getattr(
+                                self.plan, "callback_manager", None
+                            ),
                         )
+
+                    task_result_refs[sub_task.id] = self.children[
+                        child_id
+                    ].actor.run.remote(
+                        task=sub_task.task,
+                        working_memory=[
+                            task_result_refs[d.id] for d in sub_task.dependencies
+                        ],
                     )
 
-                task_result_refs[sub_task.id] = self.children[
-                    child_id
-                ].actor.run.remote(
-                    task=sub_task.task,
-                    working_memory=[
-                        task_result_refs[d.id] for d in sub_task.dependencies
-                    ],
-                )
+                if len(deferred_tasks) == len(pending_tasks):
+                    unresolved = ", ".join(task.id for task in deferred_tasks)
+                    raise ValueError(
+                        f"Task plan contains missing or cyclic dependencies: {unresolved}"
+                    )
+                pending_tasks = deferred_tasks
 
             task_results = []
             tasks_in_progress = list(task_result_refs.values())
@@ -104,7 +123,7 @@ class ParentAgent(Agent):
                 results = ray.get(tasks_completed)
 
                 for result in results:
-                    task_results.append(result)
+                    task_results.append(format_agent_result(result))
 
             self.pause_to_reflect()
 
