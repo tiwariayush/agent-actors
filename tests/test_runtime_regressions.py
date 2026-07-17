@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 def install_dependency_stubs():
@@ -244,6 +245,64 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertIsInstance(result, AgentFinish)
         self.assertIn("ID: 42", parent.plan.inputs["child_summary"])
         self.assertEqual(parent.adjust.inputs["results"], "nested result")
+
+    def test_parent_creates_planned_child_under_requested_id(self):
+        parent = object.__new__(ParentAgent)
+        parent.status = "idle"
+        parent.task = ""
+        parent.verbose = False
+        parent.reflect_every = 10
+        parent.children = {}
+        parent.llm = object()
+        parent.tools = ["search"]
+        parent.long_term_memory = object()
+
+        class FakePlan:
+            def __call__(self, inputs):
+                return {
+                    "json": [
+                        {
+                            "child_id": 42,
+                            "task_id": 0,
+                            "task": "delegate",
+                            "dependencies": [],
+                        }
+                    ]
+                }
+
+        class FakeAdjust:
+            def run(self, **kwargs):
+                return {"confidence": 8, "result": "complete"}
+
+        class FakeRun:
+            def remote(self, **kwargs):
+                return "child result"
+
+        class FakeActor:
+            run = FakeRun()
+
+        class FakeChild:
+            actor = FakeActor()
+
+        child_kwargs = {}
+
+        def create_child(**kwargs):
+            child_kwargs.update(kwargs)
+            return FakeChild()
+
+        parent.plan = FakePlan()
+        parent.adjust = FakeAdjust()
+        parent.get_context = lambda: "parent context"
+        parent.pause_to_reflect = lambda: []
+
+        with patch("agent_actors.parent.ChildAgent", side_effect=create_child):
+            result = parent.run("top-level task")
+
+        self.assertIsInstance(result, AgentFinish)
+        self.assertIn(42, parent.children)
+        self.assertIs(child_kwargs["llm"], parent.llm)
+        self.assertEqual(child_kwargs["tools"], parent.tools)
+        self.assertIs(child_kwargs["long_term_memory"], parent.long_term_memory)
 
 
 if __name__ == "__main__":
