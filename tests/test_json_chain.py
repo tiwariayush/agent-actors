@@ -34,9 +34,13 @@ JSONChain = json_chain_module.JSONChain
 
 class JSONChainTest(unittest.TestCase):
     def test_parses_markdown_fenced_json(self):
-        chain = JSONChain('```json\n[{"task_id": 0}]\n```')
-
-        self.assertEqual(chain._call({}), {"json": [{"task_id": 0}]})
+        for output in (
+            '```\n[{"task_id": 0}]\n```',
+            '```json\n[{"task_id": 0}]\n```',
+        ):
+            with self.subTest(output=output):
+                chain = JSONChain(output)
+                self.assertEqual(chain._call({}), {"json": [{"task_id": 0}]})
 
     def test_preserves_raw_json_support(self):
         chain = JSONChain('{"confidence": 8}')
