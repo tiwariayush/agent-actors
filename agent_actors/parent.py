@@ -114,7 +114,14 @@ class ParentAgent(Agent):
                 results="\n".join(task_results),
             )
 
-            if adjustment["confidence"] >= 8:
+            # Models often emit confidence as a JSON string (e.g. "8"); coerce
+            # before comparing so a successful run does not crash after child work.
+            try:
+                confidence = float(adjustment["confidence"])
+            except (TypeError, ValueError):
+                confidence = 0.0
+
+            if confidence >= 8:
                 return AgentFinish(adjustment, "success")
 
             return AgentAction("Human", "What should my next task be?", "info")
