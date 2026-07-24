@@ -52,7 +52,9 @@ class ChildAgent(Agent):
                 self.add_memory(learning)
 
                 task = self.check.run(context=context, learning=learning)
-                if "Complete" in task:
+                # Exact match only: remedial tasks often contain the word "Complete"
+                # (e.g. "Complete the missing section") and must not end the loop early.
+                if task.strip().lower() == "complete":
                     return learning
 
             return learning
