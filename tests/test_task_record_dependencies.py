@@ -1,8 +1,22 @@
+import importlib.util
 import unittest
+from pathlib import Path
 
 from pydantic import ValidationError
 
-from agent_actors.models import TaskRecord
+
+def load_models_module():
+    """Load models.py directly to avoid importing Ray via package __init__."""
+    path = Path(__file__).resolve().parents[1] / "agent_actors" / "models.py"
+    spec = importlib.util.spec_from_file_location("agent_actors_models", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+models = load_models_module()
+TaskRecord = models.TaskRecord
 
 
 class TestTaskRecordDependencies(unittest.TestCase):
