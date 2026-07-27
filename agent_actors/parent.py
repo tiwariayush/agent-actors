@@ -64,6 +64,21 @@ class ParentAgent(Agent):
                     print(f"\n=== CHILD {child_id} TASKS ===")
                     pprint(child_tasks)
 
+            # Reject duplicate child_id.task_id pairs before any Ray submit.
+            # task_result_refs is keyed by that id; duplicates would overwrite an
+            # ObjectRef, orphan the first task, and silently drop its result.
+            seen_task_ids = set()
+            duplicate_task_ids = set()
+            for sub_task in planned_tasks:
+                if sub_task.id in seen_task_ids:
+                    duplicate_task_ids.add(sub_task.id)
+                seen_task_ids.add(sub_task.id)
+            if duplicate_task_ids:
+                raise ValueError(
+                    "Plan contains duplicate task ids: "
+                    + ", ".join(sorted(duplicate_task_ids))
+                )
+
             task_result_refs = {}
 
             for sub_task in planned_tasks:
