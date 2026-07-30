@@ -12,6 +12,23 @@ from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
 
+def normalize_plan_tasks(raw_plan):
+    """Normalize Plan JSON into a list of task dicts.
+
+    The Plan prompt asks for a JSON array, but models often return a single
+    task object when only one sub-task is needed. Iterating that dict yields
+    string keys, and ``TaskRecord(**key)`` raises ``TypeError``.
+    """
+    if isinstance(raw_plan, list):
+        return raw_plan
+    if isinstance(raw_plan, dict):
+        return [raw_plan]
+    raise TypeError(
+        "Plan output must be a JSON array or task object, "
+        f"got {type(raw_plan).__name__}"
+    )
+
+
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
     adjust: Adjust = Field(init=False)
@@ -44,16 +61,18 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in normalize_plan_tasks(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"]
+                )
             ]
 
             if self.verbose:
