@@ -11,6 +11,33 @@ from agent_actors.chains.parent import Adjust, Plan
 from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
+_PLAN_TASK_LIST_KEYS = ("tasks", "subtasks", "sub_tasks", "plan")
+
+
+def normalize_plan_tasks(raw_plan):
+    """Normalize Plan JSON into a list of task dicts.
+
+    The Plan prompt asks for a bare JSON array, but models commonly wrap that
+    array in an object (e.g. ``{"tasks": [...]}``). Iterating the wrapper yields
+    string keys, and ``TaskRecord(**key)`` raises ``TypeError``, aborting the
+    parent run before any child work starts.
+    """
+    if isinstance(raw_plan, list):
+        return raw_plan
+    if isinstance(raw_plan, dict):
+        for key in _PLAN_TASK_LIST_KEYS:
+            value = raw_plan.get(key)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                return [value]
+        # Single task object when only one sub-task is needed.
+        return [raw_plan]
+    raise TypeError(
+        "Plan output must be a JSON array, tasks object, or task object, "
+        f"got {type(raw_plan).__name__}"
+    )
+
 
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
@@ -44,16 +71,18 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in normalize_plan_tasks(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"]
+                )
             ]
 
             if self.verbose:
