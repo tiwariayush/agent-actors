@@ -12,6 +12,42 @@ from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
 
+def _is_null_plan_task_placeholder(item) -> bool:
+    """True for null entries or objects with all primary task fields unset."""
+    if item is None:
+        return True
+    if isinstance(item, dict):
+        return (
+            item.get("task_id") is None
+            and item.get("child_id") is None
+            and item.get("task") is None
+        )
+    return False
+
+
+def drop_null_plan_task_placeholders(raw_plan):
+    """Drop null Plan task placeholders so ParentAgent.run does not crash.
+
+    The Plan prompt always shows a JSON array of task objects. When the model
+    decides no (or fewer) sub-tasks are needed, it often keeps that array shape
+    but nulls the placeholder (``[null]``, ``[{}]``, or objects with all primary
+    fields unset), or returns JSON ``null``. Iterating those values raises
+    ``TypeError`` while building ``TaskRecord``s and aborts before any child
+    work starts.
+
+    Distinct from draft PR #79 (null *dependency* placeholders inside a task)
+    and PR #71 (top-level ``"dependencies": null``).
+    """
+    if raw_plan is None:
+        return []
+    if not isinstance(raw_plan, list):
+        # Leave single-object / wrapper shapes to draft PRs #73 / #74.
+        return raw_plan
+    return [
+        item for item in raw_plan if not _is_null_plan_task_placeholder(item)
+    ]
+
+
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
     adjust: Adjust = Field(init=False)
@@ -44,16 +80,18 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in drop_null_plan_task_placeholders(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"]
+                )
             ]
 
             if self.verbose:
