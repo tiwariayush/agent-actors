@@ -12,6 +12,43 @@ from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
 
+def normalize_adjustment(raw_adjustment):
+    """Normalize Adjust JSON into a confidence result object.
+
+    The Adjust prompt asks for a JSON object, but models commonly return:
+    - a bare number (the prompt first asks for confidence as 1–10)
+    - a one-element array (same single-item wrapping seen on Plan)
+
+    Without normalization, ``adjustment["confidence"]`` raises ``TypeError``
+    after all child work has already finished.
+    """
+    if isinstance(raw_adjustment, list):
+        if len(raw_adjustment) == 1:
+            return normalize_adjustment(raw_adjustment[0])
+        raise TypeError(
+            "Adjust output must be a JSON object, bare confidence number, "
+            f"or one-element array, got list of length {len(raw_adjustment)}"
+        )
+    if isinstance(raw_adjustment, bool):
+        # bool is a subclass of int; reject before the numeric branch.
+        raise TypeError(
+            "Adjust output must be a JSON object or confidence number, "
+            f"got {type(raw_adjustment).__name__}"
+        )
+    if isinstance(raw_adjustment, (int, float)):
+        return {
+            "confidence": raw_adjustment,
+            "speak": "",
+            "result": str(raw_adjustment),
+        }
+    if isinstance(raw_adjustment, dict):
+        return raw_adjustment
+    raise TypeError(
+        "Adjust output must be a JSON object or confidence number, "
+        f"got {type(raw_adjustment).__name__}"
+    )
+
+
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
     adjust: Adjust = Field(init=False)
@@ -108,10 +145,12 @@ class ParentAgent(Agent):
 
             self.pause_to_reflect()
 
-            adjustment = self.adjust.run(
-                context=self.get_context(),
-                task=self.task,
-                results="\n".join(task_results),
+            adjustment = normalize_adjustment(
+                self.adjust.run(
+                    context=self.get_context(),
+                    task=self.task,
+                    results="\n".join(task_results),
+                )
             )
 
             if adjustment["confidence"] >= 8:
