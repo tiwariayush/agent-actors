@@ -1,6 +1,6 @@
 from typing import List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class TaskRef(BaseModel):
@@ -15,6 +15,17 @@ class TaskRef(BaseModel):
 class TaskRecord(TaskRef):
     task: str = Field(...)
     dependencies: List[TaskRef] = Field(default_factory=list)
+
+    @validator("dependencies", pre=True)
+    def _normalize_dependencies(cls, value):
+        # Plan LLMs often emit an empty object for "no dependencies" (the
+        # zero-dependency analogue of a bare single dependency object).
+        # Without coercion, ParentAgent.run crashes while building TaskRecords.
+        # Distinct from draft PR #71 (null), #75 (non-empty object wrap), and
+        # #79 (null/empty placeholders inside an array).
+        if isinstance(value, dict) and len(value) == 0:
+            return []
+        return value
 
     def __str__(self) -> str:
         fmt_task = f"[{self.id}] {self.task}"
