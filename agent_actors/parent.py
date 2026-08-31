@@ -11,6 +11,62 @@ from agent_actors.chains.parent import Adjust, Plan
 from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
+# Fields that distinguish a Plan task object from an unrelated mapping.
+_TASK_OBJECT_KEYS = frozenset({"task", "task_id", "child_id", "id", "dependencies"})
+
+
+def _is_nonnegative_int_key(key):
+    if isinstance(key, bool) or isinstance(key, float):
+        return False
+    if isinstance(key, int):
+        return key >= 0
+    return isinstance(key, str) and key.isdigit()
+
+
+def _looks_like_task(value):
+    return isinstance(value, dict) and bool(_TASK_OBJECT_KEYS.intersection(value))
+
+
+def _tasks_from_numeric_keyed_plan(raw_plan):
+    """Return task dicts if *raw_plan* is a numeric-keyed object of tasks.
+
+    The Plan prompt asks for a JSON array, but models often emit an object
+    keyed by index or worker id, e.g. ``{"0": {task}, "1": {task}}`` or
+    ``{"0": [{task}, {task}]}``. Iterating that object yields string keys,
+    and ``TaskRecord(**key)`` raises ``TypeError``, aborting the parent run
+    before any child work starts.
+
+    Single-task objects (``task_id`` / ``child_id`` keys) and wrappers such
+    as ``{"tasks": [...]}`` are left unchanged.
+    """
+    if not isinstance(raw_plan, dict) or not raw_plan:
+        return None
+    keys = list(raw_plan)
+    if not all(_is_nonnegative_int_key(k) for k in keys):
+        return None
+    tasks = []
+    for key in sorted(keys, key=lambda k: int(k)):
+        value = raw_plan[key]
+        if _looks_like_task(value):
+            tasks.append(value)
+        elif isinstance(value, list) and value and all(
+            _looks_like_task(item) for item in value
+        ):
+            tasks.extend(value)
+        else:
+            return None
+    return tasks
+
+
+def normalize_plan_tasks(raw_plan):
+    """Normalize numeric-keyed Plan JSON into a list of task dicts."""
+    if isinstance(raw_plan, list):
+        return raw_plan
+    keyed = _tasks_from_numeric_keyed_plan(raw_plan)
+    if keyed is not None:
+        return keyed
+    return raw_plan
+
 
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
@@ -44,16 +100,18 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in normalize_plan_tasks(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"]
+                )
             ]
 
             if self.verbose:
