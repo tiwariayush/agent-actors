@@ -9,7 +9,7 @@ from pydantic import Field
 from agent_actors.agent import Agent
 from agent_actors.chains.parent import Adjust, Plan
 from agent_actors.child import ChildAgent
-from agent_actors.models import TaskRecord
+from agent_actors.models import TaskRecord, unwrap_hyphenated_sub_task_plan
 
 
 class ParentAgent(Agent):
@@ -44,16 +44,18 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in unwrap_hyphenated_sub_task_plan(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"]
+                )
             ]
 
             if self.verbose:
