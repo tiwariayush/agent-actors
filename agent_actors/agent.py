@@ -202,7 +202,10 @@ class Agent(BaseModel):
         if last_k is None:
             last_k = self.reflect_every
 
-        observations = self.long_term_memory.memory_stream[-last_k:]
+        # TimeWeightedVectorStoreRetriever exposes memory_stream. Other retrievers
+        # the README allows do not. Parent.run always reflects, so a missing
+        # attribute must not discard child results that already finished.
+        observations = getattr(self.long_term_memory, "memory_stream", [])[-last_k:]
         if not any(observations):
             return []
 
