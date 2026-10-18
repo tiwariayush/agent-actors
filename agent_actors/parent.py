@@ -12,6 +12,37 @@ from agent_actors.child import ChildAgent
 from agent_actors.models import TaskRecord
 
 
+def coerce_string_plan(raw_plan, child_ids):
+    """Turn a JSON array of task strings into task objects.
+
+    The Plan prompt asks for objects, but models often return a bare list of
+    steps such as ``["Look up the age", "Multiply it by 12"]``. Splatting each
+    string into ``TaskRecord`` raises ``TypeError`` and aborts the parent run
+    before any child work starts. Other plan shapes are left unchanged.
+    """
+    if not (
+        isinstance(raw_plan, list)
+        and raw_plan
+        and all(isinstance(item, str) and item.strip() for item in raw_plan)
+    ):
+        return raw_plan
+
+    if not child_ids or 0 in child_ids:
+        child_id = 0
+    else:
+        child_id = min(child_ids)
+
+    return [
+        {
+            "child_id": child_id,
+            "task_id": index,
+            "task": item.strip(),
+            "dependencies": [],
+        }
+        for index, item in enumerate(raw_plan)
+    ]
+
+
 class ParentAgent(Agent):
     plan: Plan = Field(init=False)
     adjust: Adjust = Field(init=False)
@@ -44,16 +75,19 @@ class ParentAgent(Agent):
 
             planned_tasks = [
                 TaskRecord(**t)
-                for t in self.plan(
-                    inputs=dict(
-                        context=context,
-                        task=self.task,
-                        child_summary="\n\n".join(
-                            f"ID: {id}\n{child.get_context()}"
-                            for id, child in self.children.items()
+                for t in coerce_string_plan(
+                    self.plan(
+                        inputs=dict(
+                            context=context,
+                            task=self.task,
+                            child_summary="\n\n".join(
+                                f"ID: {id}\n{child.get_context()}"
+                                for id, child in self.children.items()
+                            ),
                         ),
-                    ),
-                )["json"]
+                    )["json"],
+                    self.children,
+                )
             ]
 
             if self.verbose:
