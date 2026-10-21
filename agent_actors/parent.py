@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pprint import pprint
-from typing import List
+from typing import Dict, List, Optional
 
 import ray
 from langchain.schema import AgentAction, AgentFinish
@@ -30,8 +30,20 @@ class ParentAgent(Agent):
             adjust=Adjust.from_llm(**chain_params),
         )
 
-    def run(self, task: str, working_memory: List[ray.ObjectRef] = []):
+    def run(
+        self,
+        task: str,
+        working_memory: List[ray.ObjectRef] = [],
+        child_roster: Optional[Dict[int, Agent]] = None,
+    ):
         try:
+            # The Ray actor is a snapshot from Agent.__init__. Children attached
+            # after that exist on the caller only, so a nested parent would plan
+            # with an empty team and never run the agents the caller configured.
+            if child_roster:
+                for roster_id, roster_child in child_roster.items():
+                    self.children[roster_id] = roster_child
+
             self.status = "running"
             self.task = task
 
@@ -84,14 +96,16 @@ class ParentAgent(Agent):
                         )
                     )
 
-                task_result_refs[sub_task.id] = self.children[
-                    child_id
-                ].actor.run.remote(
-                    task=sub_task.task,
-                    working_memory=[
+                child = self.children[child_id]
+                remote_kwargs = {
+                    "task": sub_task.task,
+                    "working_memory": [
                         task_result_refs[d.id] for d in sub_task.dependencies
                     ],
-                )
+                }
+                if isinstance(child, ParentAgent) and child.children:
+                    remote_kwargs["child_roster"] = dict(child.children)
+                task_result_refs[sub_task.id] = child.actor.run.remote(**remote_kwargs)
 
             task_results = []
             tasks_in_progress = list(task_result_refs.values())
